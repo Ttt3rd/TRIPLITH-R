@@ -1,4 +1,4 @@
-
+// TRIPLITH-R Game Server
 import { DurableObject } from "cloudflare:workers";
 
 // 対戦ルームを管理するクラス
