@@ -1,0 +1,14 @@
+{
+  "rules": {
+    "rooms": {
+      "$roomId": {
+        "state": { ".read": false, ".write": false },
+        "public": { ".read": "auth != null", ".write": false },
+        "views": {
+          "$uid": { ".read": "auth != null && auth.uid === $uid", ".write": false }
+        }
+      }
+    },
+    "codes": { ".read": false, ".write": false }
+  }
+}
