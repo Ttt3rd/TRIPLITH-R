@@ -1,9 +1,7 @@
-// Firebase Console > Project settings > Your apps から設定値を貼り付けてください。
-// apiKey等はブラウザに公開される値ですが、Realtime Database RulesとCallable Functionsで必ず保護してください。
 export const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "YOUR_PROJECT_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyDLFyCLepizqDlvUlSK9k3GOrpu5a1bvvE",
+  authDomain: "triplith-r.firebaseapp.com",
+  databaseURL: "https://triplith-r-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "triplith-r",
+  appId: "1:765243240680:web:6234ee3891290c204ed95d"
 };
