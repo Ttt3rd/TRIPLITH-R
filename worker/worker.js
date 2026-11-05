@@ -2,7 +2,6 @@
 import { DurableObject } from "cloudflare:workers";
 
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
 const CARD_VALUES = [
   ...Array.from({ length: 10 }, (_, i) => String(-(i + 1))),
   ...Array.from({ length: 10 }, (_, i) => String(i + 1)),
@@ -36,12 +35,14 @@ function randomInt(max) {
 
 function randomString(
   length,
-  chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+  chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 ) {
   let result = "";
+
   for (let i = 0; i < length; i++) {
     result += chars[randomInt(chars.length)];
   }
+
   return result;
 }
 
@@ -58,6 +59,7 @@ function shuffle(cards) {
     const j = randomInt(i + 1);
     [cards[i], cards[j]] = [cards[j], cards[i]];
   }
+
   return cards;
 }
 
@@ -144,11 +146,17 @@ function evaluateHand(hand) {
   if (hand.every((card) => card === "0")) {
     role = "TRIPLITH";
     bonus = 1000;
-  } else if (hand.every((card) => card === "STAR" || card === "0")) {
+
+  } else if (
+    hand.every((card) => card === "STAR" || card === "0")
+  ) {
     role = "SYMBOL";
     bonus = 400;
+
   } else {
-    const values = numbers.filter((value) => value !== null);
+    const values = numbers.filter(
+      (value) => value !== null
+    );
 
     if (
       values.some((value, index) =>
@@ -221,7 +229,10 @@ function finishRound(state) {
   const active = currentActivePlayers(state);
 
   if (!active.length) {
-    throw new GameError("勝負できるプレイヤーがいません。", 500);
+    throw new GameError(
+      "勝負できるプレイヤーがいません。",
+      500
+    );
   }
 
   const evaluated = active.map((player) => ({
@@ -237,19 +248,29 @@ function finishRound(state) {
     .filter((entry) => entry.value === bestValue)
     .map((entry) => entry.player);
 
-  const allActiveTied = winners.length === active.length;
-  const allIns = state.players.filter((player) => player.allIn);
+  const allActiveTied =
+    winners.length === active.length;
 
-  // オールインがある場合、最も少ないオールイン額を上限にする。
-  // 超過分は元の持ち主へ返す。
+  const allIns = state.players.filter(
+    (player) => player.allIn
+  );
+
+  // オールインがある場合、最も少ないオールイン額を
+  // 共通の上限として扱い、超過分を元の持ち主へ返す。
   const cap = allIns.length
-    ? Math.min(...allIns.map((player) => player.contribution))
+    ? Math.min(
+        ...allIns.map((player) => player.contribution)
+      )
     : Infinity;
 
   let eligiblePot = 0;
 
   for (const player of state.players) {
-    const eligible = Math.min(player.contribution, cap);
+    const eligible = Math.min(
+      player.contribution,
+      cap
+    );
+
     const refund = player.contribution - eligible;
 
     player.score += refund;
@@ -257,43 +278,72 @@ function finishRound(state) {
   }
 
   if (allActiveTied) {
-    // 全員同点時は各自の賭け点を返却する。
-    // フォールド者の拠出分があれば同点者で分配する。
-    const activeContribution = active.reduce(
-      (sum, player) =>
-        sum + Math.min(player.contribution, cap),
-      0
-    );
+    // 同点時：
+    // 通常拠出分は各自に返却する。
+    // レイズ増額分とフォールド者の拠出分は
+    // レイズしていない勝者で分配する。
 
-    const foldedContribution = eligiblePot - activeContribution;
+    let returnedToPlayers = 0;
 
     for (const player of active) {
-      player.score += Math.min(player.contribution, cap);
+      const eligible = Math.min(
+        player.contribution,
+        cap
+      );
+
+      const raisedPart = Math.min(
+        player.raiseContribution || 0,
+        eligible
+      );
+
+      const personalReturn =
+        eligible - raisedPart;
+
+      player.score += personalReturn;
+      returnedToPlayers += personalReturn;
     }
 
-    if (foldedContribution > 0) {
+    const pool = Math.max(
+      0,
+      eligiblePot - returnedToPlayers
+    );
+
+    const nonRaisingWinners = winners.filter(
+      (player) => (player.raises || 0) === 0
+    );
+
+    const recipients =
+      nonRaisingWinners.length
+        ? nonRaisingWinners
+        : winners;
+
+    if (pool > 0 && recipients.length > 0) {
       const share = Math.floor(
-        foldedContribution / winners.length
+        pool / recipients.length
       );
 
       let remainder =
-        foldedContribution - share * winners.length;
+        pool - share * recipients.length;
 
-      for (const player of winners) {
-        player.score += share + (remainder > 0 ? 1 : 0);
+      for (const player of recipients) {
+        player.score +=
+          share + (remainder > 0 ? 1 : 0);
 
         if (remainder > 0) remainder--;
       }
     }
+
   } else {
     const share = Math.floor(
       eligiblePot / winners.length
     );
 
-    let remainder = eligiblePot - share * winners.length;
+    let remainder =
+      eligiblePot - share * winners.length;
 
     for (const player of winners) {
-      player.score += share + (remainder > 0 ? 1 : 0);
+      player.score +=
+        share + (remainder > 0 ? 1 : 0);
 
       if (remainder > 0) remainder--;
     }
@@ -345,7 +395,9 @@ function finishRound(state) {
   state.currentBet = 0;
 
   const gameOver = state.players.some(
-    (player) => player.score <= 0 || player.score > 20000
+    (player) =>
+      player.score <= 0 ||
+      player.score > 20000
   );
 
   if (gameOver) {
@@ -383,8 +435,10 @@ function settleIfReady(state) {
     const allReady = active.every(
       (player) =>
         player.allIn ||
-        (player.called &&
-          player.contribution >= state.currentBet)
+        (
+          player.called &&
+          player.contribution >= state.currentBet
+        )
     );
 
     if (allReady) {
@@ -418,7 +472,9 @@ function validateIndices(indices) {
         index > 2
     )
   ) {
-    throw new GameError("カードの選択が不正です。");
+    throw new GameError(
+      "カードの選択が不正です。"
+    );
   }
 
   return clean;
@@ -442,7 +498,10 @@ function doAction(
     player.allIn ||
     state.players[state.currentTurn]?.id !== playerId
   ) {
-    throw new GameError("あなたの手番ではありません。", 409);
+    throw new GameError(
+      "あなたの手番ではありません。",
+      409
+    );
   }
 
   if (state.phase === "prebet") {
@@ -450,9 +509,13 @@ function doAction(
       player.called = true;
       state.checkCount++;
 
-      appendLog(state, `${player.name}：チェック`);
+      appendLog(
+        state,
+        `${player.name}：チェック`
+      );
 
       state.currentTurn = nextTurn(state);
+
     } else if (action === "change") {
       const selected = validateIndices(indices);
 
@@ -475,6 +538,7 @@ function doAction(
       );
 
       state.currentTurn = nextTurn(state);
+
     } else if (action === "bet") {
       const betAmount = Number(amount);
 
@@ -509,15 +573,19 @@ function doAction(
       );
 
       state.currentTurn = nextTurn(state);
+
     } else {
       throw new GameError(
         "このフェーズではその行動はできません。"
       );
     }
+
   } else if (state.phase === "betting") {
     if (action === "swap") {
       if (player.swapped) {
-        throw new GameError("スワップは1人1回までです。");
+        throw new GameError(
+          "スワップは1人1回までです。"
+        );
       }
 
       const selected = validateIndices(indices);
@@ -533,12 +601,14 @@ function doAction(
         `${player.name}：スワップ（${selected.length}枚）`
       );
 
-      // スワップは手番を終了せず、続けてコール等を選べる。
+      // スワップは手番を終了せず、
+      // 続けてコール等を選択できる。
       return;
     }
 
     if (action === "call") {
-      const due = state.currentBet - player.contribution;
+      const due =
+        state.currentBet - player.contribution;
 
       if (due < 0 || player.score < due) {
         throw new GameError(
@@ -557,9 +627,13 @@ function doAction(
       state.pot += due;
       player.called = true;
 
-      appendLog(state, `${player.name}：コール`);
+      appendLog(
+        state,
+        `${player.name}：コール`
+      );
 
       state.currentTurn = nextTurn(state);
+
     } else if (action === "raise") {
       if (
         state.raisesTotal >= 8 ||
@@ -568,8 +642,15 @@ function doAction(
         throw new GameError("レイズ上限です。");
       }
 
-      const newBet = state.currentBet * 2;
-      const due = newBet - player.contribution;
+      const previousBet = state.currentBet;
+      const newBet = previousBet * 2;
+
+      // レイズ分だけを別に記録する。
+      const raiseIncrement =
+        newBet - previousBet;
+
+      const due =
+        newBet - player.contribution;
 
       if (player.score < due) {
         throw new GameError(
@@ -584,7 +665,8 @@ function doAction(
       }
 
       player.contribution += due;
-      player.raiseContribution += due;
+      player.raiseContribution += raiseIncrement;
+
       state.pot += due;
       state.currentBet = newBet;
 
@@ -601,12 +683,15 @@ function doAction(
       );
 
       state.currentTurn = nextTurn(state);
+
     } else if (action === "fold") {
       if (
         state.foldUsed ||
         state.raisesTotal >= 4
       ) {
-        throw new GameError("現在はフォールドできません。");
+        throw new GameError(
+          "現在はフォールドできません。"
+        );
       }
 
       const penalty = Math.min(
@@ -620,9 +705,13 @@ function doAction(
       player.folded = true;
       state.foldUsed = true;
 
-      appendLog(state, `${player.name}：フォールド`);
+      appendLog(
+        state,
+        `${player.name}：フォールド`
+      );
 
       state.currentTurn = nextTurn(state);
+
     } else if (action === "allin") {
       const allInAmount = player.score;
 
@@ -638,12 +727,17 @@ function doAction(
       player.allIn = true;
       player.called = true;
 
-      appendLog(state, `${player.name}：オールイン`);
+      appendLog(
+        state,
+        `${player.name}：オールイン`
+      );
 
       state.currentTurn = nextTurn(state);
+
     } else {
       throw new GameError("不正な行動です。");
     }
+
   } else {
     throw new GameError(
       "現在は行動できません。",
@@ -677,14 +771,20 @@ function cpuAction(state, player) {
         state,
         `${player.name}：100点ベット`
       );
+
     } else {
       player.called = true;
       state.checkCount++;
 
-      appendLog(state, `${player.name}：チェック`);
+      appendLog(
+        state,
+        `${player.name}：チェック`
+      );
     }
+
   } else if (state.phase === "betting") {
-    const due = state.currentBet - player.contribution;
+    const due =
+      state.currentBet - player.contribution;
 
     if (player.score < due) {
       const amount = player.score;
@@ -695,7 +795,11 @@ function cpuAction(state, player) {
       player.allIn = true;
       player.called = true;
 
-      appendLog(state, `${player.name}：オールイン`);
+      appendLog(
+        state,
+        `${player.name}：オールイン`
+      );
+
     } else {
       player.score -= due;
 
@@ -707,7 +811,10 @@ function cpuAction(state, player) {
       state.pot += due;
       player.called = true;
 
-      appendLog(state, `${player.name}：コール`);
+      appendLog(
+        state,
+        `${player.name}：コール`
+      );
     }
   }
 
@@ -785,11 +892,13 @@ function makeSnapshot(state, viewerId) {
     view: {
       hasStar: viewer.hand.includes("STAR"),
 
+      // スターの位置だけ本人に送信する。
+      // 手札の数字は引き続き送信しない。
+      starIndex: viewer.hand.indexOf("STAR"),
+
       players: state.players.map((player) => ({
         ...publicPlayer(player),
 
-        // 自分の数字は送信しない。
-        // 他プレイヤーの手札は表示する。
         hand:
           player.id === viewerId
             ? []
@@ -834,6 +943,7 @@ export default {
           200,
           corsHeaders
         );
+
       } catch (error) {
         return json(
           {
@@ -1036,6 +1146,7 @@ export default {
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+
     this.env = env;
     this.clients = new Map();
   }
@@ -1062,7 +1173,10 @@ export class Room extends DurableObject {
       const state = await this.ctx.storage.get("state");
 
       if (!state) {
-        throw new GameError("ルームが見つかりません。", 404);
+        throw new GameError(
+          "ルームが見つかりません。",
+          404
+        );
       }
 
       mutator(state);
@@ -1090,7 +1204,10 @@ export class Room extends DurableObject {
     const state = await this.readState();
 
     if (!state) {
-      throw new GameError("ルームが見つかりません。", 404);
+      throw new GameError(
+        "ルームが見つかりません。",
+        404
+      );
     }
 
     const player = state.players.find(
@@ -1410,6 +1527,7 @@ export class Room extends DurableObject {
         { error: "APIが見つかりません。" },
         404
       );
+
     } catch (error) {
       const status =
         error instanceof GameError
@@ -1458,7 +1576,7 @@ export class Room extends DurableObject {
             })
           );
         } catch {
-          // 接続が閉じている場合
+          // 接続終了済み
         }
       });
     });
