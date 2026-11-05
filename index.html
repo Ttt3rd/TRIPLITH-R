@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="ja">
 <head>
@@ -5,111 +6,410 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#11100f">
 <title>TRIPLITH</title>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700;900&display=swap" rel="stylesheet">
+
+<link
+  href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700;900&display=swap"
+  rel="stylesheet"
+>
+
 <link rel="stylesheet" href="./style.css">
 </head>
+
 <body>
+
 <header class="topbar">
   <div class="brand">TRIPLITH</div>
-  <div class="top-actions"><span id="connection">未接続</span><button class="quiet" id="rulesBtn">ルール</button></div>
+
+  <div class="top-actions">
+    <span id="connection">未接続</span>
+    <button class="quiet" id="rulesBtn">ルール</button>
+  </div>
 </header>
 
 <main>
+
+  <!-- ロビー -->
   <section id="lobby" class="panel lobby">
-    <div class="eyebrow">THREE PLAYER CARD GAME</div>
+
+    <div class="eyebrow">
+      THREE PLAYER CARD GAME
+    </div>
+
     <h1>TRIPLITH</h1>
-    <p class="lead">運と読み合いで、三枚の運命を賭けろ。</p>
-    <label>プレイヤー名<input id="playerName" maxlength="16" placeholder="名前を入力" value="Player"></label>
+
+    <p class="lead">
+      運と読み合いで、三枚の運命を賭けろ。
+    </p>
+
+    <label>
+      プレイヤー名
+      <input
+        id="playerName"
+        maxlength="16"
+        placeholder="名前を入力"
+        value="Player"
+      >
+    </label>
+
+    <label>
+      専用アクセスコード
+      <input
+        id="accessCode"
+        type="password"
+        autocomplete="current-password"
+        placeholder="管理者から配布されたコード"
+      >
+    </label>
+
     <div class="lobby-grid">
+
       <div class="lobby-card">
         <h2>ルームを作成</h2>
         <p>新しい対戦ルームを作成します。</p>
-        <button id="createRoom" class="gold-button">ルーム作成</button>
+
+        <button id="createRoom" class="gold-button">
+          ルーム作成
+        </button>
       </div>
+
       <div class="lobby-card">
         <h2>ルームに参加</h2>
         <p>共有された6桁のコードを入力。</p>
-        <input id="roomCode" maxlength="6" placeholder="ROOM ID">
-        <button id="joinRoom" class="gold-button">参加する</button>
+
+        <input
+          id="roomCode"
+          maxlength="6"
+          placeholder="ROOM ID"
+        >
+
+        <button id="joinRoom" class="gold-button">
+          参加する
+        </button>
       </div>
+
     </div>
-    <p class="small-note">オンライン対戦には、管理者がFirebaseの設定とデプロイを完了している必要があります。</p>
+
+    <p class="small-note">
+      テストプレイ用の専用アクセスコードが必要です。
+      ルームコードは作成後に対戦相手へ共有してください。
+    </p>
+
     <div id="lobbyError" class="error"></div>
+
   </section>
 
+
+  <!-- 待機ルーム -->
   <section id="waiting" class="panel hidden">
-    <div class="eyebrow">PRIVATE TABLE</div>
-    <h2>待機ルーム</h2>
-    <div class="room-code-line">ROOM <strong id="roomCodeView">------</strong><button id="copyCode" class="quiet">コピー</button></div>
-    <p class="muted">このコードを対戦相手に共有してください。</p>
-    <div id="waitingSeats" class="seat-list"></div>
-    <div class="lobby-actions">
-      <button id="addCpu" class="dark-button">CPUを追加</button>
-      <button id="startGame" class="gold-button">ゲーム開始</button>
-      <button id="leaveRoom" class="quiet">退出</button>
+
+    <div class="eyebrow">
+      PRIVATE TABLE
     </div>
+
+    <h2>待機ルーム</h2>
+
+    <div class="room-code-line">
+      ROOM
+      <strong id="roomCodeView">------</strong>
+
+      <button id="copyCode" class="quiet">
+        コピー
+      </button>
+    </div>
+
+    <p class="muted">
+      このコードを対戦相手に共有してください。
+    </p>
+
+    <div id="waitingSeats" class="seat-list"></div>
+
+    <div class="lobby-actions">
+
+      <button id="addCpu" class="dark-button">
+        CPUを追加
+      </button>
+
+      <button id="startGame" class="gold-button">
+        ゲーム開始
+      </button>
+
+      <button id="leaveRoom" class="quiet">
+        退出
+      </button>
+
+    </div>
+
     <div id="waitingError" class="error"></div>
+
   </section>
 
+
+  <!-- ゲーム画面 -->
   <section id="game" class="hidden">
+
     <div class="game-meta">
-      <div><span class="eyebrow">TABLE</span><strong id="gameRoomCode"></strong></div>
-      <div class="pot-box"><span>現在のポット</span><strong id="pot">0</strong><small>点</small></div>
-      <div><span class="eyebrow">PHASE</span><strong id="phaseLabel">---</strong></div>
+
+      <div>
+        <span class="eyebrow">TABLE</span>
+        <strong id="gameRoomCode"></strong>
+      </div>
+
+      <div class="pot-box">
+        <span>現在のポット</span>
+        <strong id="pot">0</strong>
+        <small>点</small>
+      </div>
+
+      <div>
+        <span class="eyebrow">PHASE</span>
+        <strong id="phaseLabel">---</strong>
+      </div>
+
     </div>
+
+
+    <!-- テーブル -->
     <div class="table">
+
       <div id="opponents" class="opponents"></div>
+
       <div class="table-center">
+
         <div class="ornament">✦</div>
-        <div class="table-title">TRIPLITH</div>
-        <div class="table-sub">FORTUNE FAVORS THE BOLD</div>
-        <div class="bet-info">現在のベット <strong id="currentBet">0</strong><span>点</span></div>
-        <div id="turnInfo" class="turn-info">---</div>
-        <div id="gameLog" class="game-log"></div>
-      </div>
-      <div class="self-area">
-        <div class="self-heading">
-          <div><span class="eyebrow">YOUR SEAT</span><h2 id="selfName">---</h2></div>
-          <div class="score"><span>所持点数</span><strong id="selfScore">10000</strong></div>
+
+        <div class="table-title">
+          TRIPLITH
         </div>
+
+        <div class="table-sub">
+          FORTUNE FAVORS THE BOLD
+        </div>
+
+        <div class="bet-info">
+          現在のベット
+          <strong id="currentBet">0</strong>
+          <span>点</span>
+        </div>
+
+        <div id="turnInfo" class="turn-info">
+          ---
+        </div>
+
+        <div id="gameLog" class="game-log"></div>
+
+      </div>
+
+
+      <!-- 自分のエリア -->
+      <div class="self-area">
+
+        <div class="self-heading">
+
+          <div>
+            <span class="eyebrow">YOUR SEAT</span>
+            <h2 id="selfName">---</h2>
+          </div>
+
+          <div class="score">
+            <span>所持点数</span>
+            <strong id="selfScore">10000</strong>
+          </div>
+
+        </div>
+
         <div id="myHand" class="hand self-hand"></div>
-        <div class="hand-hint">カードを選択して交換対象を指定（手札の数字は見えません）</div>
+
+        <div class="hand-hint">
+          カードを選択して交換対象を指定（手札の数字は見えません）
+        </div>
+
       </div>
+
     </div>
+
+
+    <!-- 操作パネル -->
     <div class="action-panel">
-      <div class="action-status" id="actionStatus">あなたの番ではありません</div>
+
+      <div class="action-status" id="actionStatus">
+        あなたの番ではありません
+      </div>
+
+
+      <!-- ベット前 -->
       <div id="preBetActions" class="action-row hidden">
-        <button id="checkBtn" class="dark-button">チェック</button>
-        <button id="changeBtn" class="dark-button">チェンジ</button>
-        <label class="bet-select">ベット額<select id="betAmount"><option value="100">100</option><option value="200">200</option><option value="400">400</option><option value="800">800</option></select></label>
-        <button id="betBtn" class="gold-button">ベット</button>
+
+        <button id="checkBtn" class="dark-button">
+          チェック
+        </button>
+
+        <button id="changeBtn" class="dark-button">
+          チェンジ
+        </button>
+
+        <label class="bet-select">
+          ベット額
+
+          <select id="betAmount">
+            <option value="100">100</option>
+            <option value="200">200</option>
+            <option value="400">400</option>
+            <option value="800">800</option>
+          </select>
+        </label>
+
+        <button id="betBtn" class="gold-button">
+          ベット
+        </button>
+
       </div>
+
+
+      <!-- ベット後 -->
       <div id="betActions" class="action-row hidden">
-        <button id="callBtn" class="gold-button">コール</button>
-        <button id="raiseBtn" class="dark-button">レイズ ×2</button>
-        <button id="foldBtn" class="danger-button">フォールド</button>
-        <button id="allInBtn" class="danger-button">オールイン</button>
-        <button id="swapBtn" class="dark-button">スワップ</button>
+
+        <button id="callBtn" class="gold-button">
+          コール
+        </button>
+
+        <button id="raiseBtn" class="dark-button">
+          レイズ ×2
+        </button>
+
+        <button id="foldBtn" class="danger-button">
+          フォールド
+        </button>
+
+        <button id="allInBtn" class="danger-button">
+          オールイン
+        </button>
+
+        <button id="swapBtn" class="dark-button">
+          スワップ
+        </button>
+
       </div>
-      <div class="action-foot"><span id="raiseInfo"></span><button id="backLobby" class="quiet">ルーム画面へ</button></div>
+
+
+      <div class="action-foot">
+
+        <span id="raiseInfo"></span>
+
+        <button id="backLobby" class="quiet">
+          ルーム画面へ
+        </button>
+
+      </div>
+
       <div id="gameError" class="error"></div>
+
     </div>
+
   </section>
+
 </main>
 
+
+<!-- ルールダイアログ -->
 <dialog id="rulesDialog">
-  <div class="dialog-head"><h2>TRIPLITH ルール</h2><button id="closeRules" class="quiet">閉じる</button></div>
-  <div class="rules-content">
-    <h3>基本</h3><p>3人対戦。各プレイヤーは10,000点で開始。3枚のカードの積が最も大きいプレイヤーが勝者です。</p>
-    <h3>カード</h3><p>−10〜−1、＋1〜＋10、0が3枚、スターが1枚。各プレイヤーに3枚配られます。自分の数字は見えず、他プレイヤーの手札は見えます。自分がスターを持つ場合は裏面で判別できます。</p>
-    <h3>ベット前</h3><p><b>チェンジ：</b>1〜3枚交換。元のカードは山札に戻してシャッフルし、手番終了。<br><b>チェック：</b>手札を変えずに手番を進めます。<br><b>ベット：</b>100 / 200 / 400 / 800点を賭けます。</p>
-    <h3>ベット後</h3><p><b>コール：</b>現在のベット額に合わせます。<br><b>レイズ：</b>現在額を2倍にします（1人4回・全体8回まで）。<br><b>フォールド：</b>最初の1人のみ。4回レイズ後は不可。<br><b>オールイン：</b>残り全点数を賭けます。<br><b>スワップ：</b>1人1回、1〜3枚交換。元カードは山札に戻さず、交換後も同じ手番で行動できます。</p>
-    <h3>特殊役</h3><p>TRIPLITH：0が3枚（+1000）／SYMBOL：スター・0のみ（+400）／DOUBLES：絶対値が同じカード2枚（+200）。特殊役同士は複合しません。</p>
-    <p class="small-note">この試作版では、全員チェック時の公開、同点時の精算、オールインのサイドポットは実装上の暫定処理を含みます。詳細はREADMEを確認してください。</p>
+
+  <div class="dialog-head">
+    <h2>TRIPLITH ルール</h2>
+
+    <button id="closeRules" class="quiet">
+      閉じる
+    </button>
   </div>
+
+
+  <div class="rules-content">
+
+    <h3>基本</h3>
+
+    <p>
+      3人対戦。各プレイヤーは10,000点で開始。
+      3枚のカードの積が最も大きいプレイヤーが勝者です。
+    </p>
+
+
+    <h3>カード</h3>
+
+    <p>
+      −10〜−1、＋1〜＋10、0が3枚、スターが1枚。
+      各プレイヤーに3枚配られます。
+      自分の数字は見えず、他プレイヤーの手札は見えます。
+      自分がスターを持つ場合は裏面で判別できます。
+    </p>
+
+
+    <h3>ベット前</h3>
+
+    <p>
+      <b>チェンジ：</b>
+      1〜3枚交換。元のカードは山札に戻してシャッフルし、
+      手番終了。
+      <br>
+
+      <b>チェック：</b>
+      手札を変えずに手番を進めます。
+      <br>
+
+      <b>ベット：</b>
+      100 / 200 / 400 / 800点を賭けます。
+    </p>
+
+
+    <h3>ベット後</h3>
+
+    <p>
+      <b>コール：</b>
+      現在のベット額に合わせます。
+      <br>
+
+      <b>レイズ：</b>
+      現在額を2倍にします（1人4回・全体8回まで）。
+      <br>
+
+      <b>フォールド：</b>
+      最初の1人のみ。4回レイズ後は不可。
+      <br>
+
+      <b>オールイン：</b>
+      残り全点数を賭けます。
+      <br>
+
+      <b>スワップ：</b>
+      1人1回、1〜3枚交換。
+      元カードは山札に戻さず、
+      交換後も同じ手番で行動できます。
+    </p>
+
+
+    <h3>特殊役</h3>
+
+    <p>
+      TRIPLITH：0が3枚（+1000）／
+      SYMBOL：スター・0のみ（+400）／
+      DOUBLES：絶対値が同じカード2枚（+200）。
+      特殊役同士は複合しません。
+    </p>
+
+
+    <p class="small-note">
+      このテスト版では、同点時の精算や
+      オールインのサイドポットなどに
+      暫定処理が含まれます。
+    </p>
+
+  </div>
+
 </dialog>
+
+
 <script type="module" src="./app.js"></script>
+
 </body>
 </html>
