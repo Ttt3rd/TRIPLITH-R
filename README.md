@@ -1,73 +1,159 @@
-# TRIPLITH
 
-ゴシック調の3人対戦カードゲーム「TRIPLITH」のWebアプリ試作版です。
+# TRIPLITH-R
+
+ゴシック調の3人対戦カードゲーム「TRIPLITH」のWebアプリです。
+
+現在はCloudflare Workers + Durable Objectsを利用したオンラインテストプレイ構成です。
 
 ## ファイル構成
-- `index.html` / `style.css` / `app.js`：GitHub Pages等で公開するフロントエンド
-- `firebase-config.js`：Firebaseプロジェクトの接続設定
-- `functions/index.js`：山札・手札・ターン・得点を管理するサーバー処理
-- `database.rules.json`：クライアントから非公開ゲーム状態へアクセスできないようにするルール
-- `assets/cards/`：保存済みのTRIPLITHカード画像を使用
 
-## 必要なもの
-- Firebaseプロジェクト
-- Firebase Authentication の匿名認証を有効化
-- Realtime Database（ロケーションは `asia-southeast1` を推奨）
-- Firebase CLI
-- Node.js 20
-- GitHubアカウント（GitHub Pagesで公開する場合）
+- `index.html` / `style.css` / `app.js`：GitHub Pagesで公開するフロントエンド
+- `assets/cards/`：カード画像素材
+- `worker/worker.js`：ルーム管理、ゲーム進行、アクセスコード検証、WebSocket通信
+- `worker/wrangler.jsonc`：Cloudflare Worker / SQLite Durable Object設定
+- `firebase-config.js`：既存Firebase接続設定
+- `firebase.json`：既存Firebase設定
+- `database.rules.json`：既存Realtime Databaseルール
+- `functions/`：旧Firebase Cloud Functions
 
-## セットアップ
+Firebase関連のファイルは削除せず保持しています。
+現在のテストプレイ版ではFirebaseをゲーム通信に使用しません。
 
-1. Firebase Consoleでプロジェクトを作成する。
-2. Authentication → Sign-in method → Anonymous を有効にする。
-3. Realtime Databaseを作成する。ロケーションは `asia-southeast1` にする。
-4. Project settings → Your apps → Web app を作成し、設定値を `firebase-config.js` に入力する。
-5. Firebase CLIをインストールしてログインする。
+## オンライン対戦の構成
+
+| 機能 | 使用サービス |
+|---|---|
+| ゲーム画面 | GitHub Pages |
+| ゲームサーバー | Cloudflare Workers |
+| ルーム管理 | Durable Objects |
+| データ保存 | Durable Objects SQLite |
+| リアルタイム通信 | WebSocket |
+| アクセス制限 | Cloudflare Secret |
+| Firebase | 設定を保持。現在は未使用 |
+
+## Cloudflareの設定
+
+CloudflareのWorker `triplith-r-game-server` に以下のSecretを登録してください。
+
+| 名前 | 種類 | 内容 |
+|---|---|---|
+| `ACCESS_CODE` | Secret | テストプレイ用の専用アクセスコード |
+
+アクセスコードはソースコードやGitHubリポジトリに記載しないでください。
+
+プレイヤー全員に同じアクセスコードを配布します。
+
+ルーム作成後は、別途発行される6桁のルームコードを対戦相手に共有してください。
+
+### デプロイ設定
+
+Cloudflare Buildsの設定は次のとおりです。
+
+- 本番ブランチ：`main`
+- ビルドコマンド：空欄
+- デプロイコマンド：
 
 ```bash
-npm install -g firebase-tools
-firebase login
-firebase use --add
+npx wrangler deploy --config worker/wrangler.jsonc
 ```
 
-6. Cloud Functionsをセットアップ・デプロイする。
+`worker/wrangler.jsonc` を明示しているため、ルートディレクトリの変更は不要です。
 
-```bash
-cd functions
-npm install
-cd ..
-firebase deploy --only database,functions
-```
+## テストプレイの手順
 
-7. フロントエンドをGitHubリポジトリにアップロードする。GitHub Pagesを有効にする。
-   またはFirebase Hostingで公開する場合：
+1. Cloudflareに `ACCESS_CODE` Secretを登録する。
+2. GitHubの `main` ブランチにコードを反映する。
+3. Cloudflareの自動デプロイが成功したことを確認する。
+4. GitHub Pagesの公開URLを開く。
+5. 全プレイヤーが専用アクセスコードとプレイヤー名を入力する。
+6. 1人がルームを作成する。
+7. 発行された6桁のルームコードを共有する。
+8. 他の2人がルームに参加する。
+9. 3人揃ったらホストがゲームを開始する。
 
-```bash
-firebase deploy --only hosting
-```
+友達が3人揃わない場合は、ホストがCPUを追加して動作確認できます。
 
-## 重要なセキュリティ設計
-- 実際の手札・山札・ゲーム進行状態は `/rooms/{roomId}/state` に保存し、クライアントからの読み書きを禁止しています。
-- クライアントには公開状態と、そのプレイヤー向けの個別ビューだけを配信します。
-- 山札のシャッフル、配札、カード交換、勝敗判定はCallable Functions側で実行します。
-- FirebaseのWeb APIキーは秘密情報ではありません。Realtime Database Rulesとサーバー関数による保護が必要です。
+## ゲームの基本仕様
 
-## 現在の試作版の仕様・暫定事項
-- 3席固定。空席にはホストがCPUを追加できます。
-- CPUは簡易AI（ベット前はチェック中心、ベット後はコール中心）です。
-- チェンジ：ベット前、1〜3枚。交換前カードを山札に戻してシャッフルします。
-- スワップ：ベット後、1〜3枚、1人1回。交換前カードを山札に戻しません。交換後も同じ手番で別の行動ができます。
-- スワップ前のカードは他プレイヤーから見えているため、交換前後のカードは全員に公開されます。
-- 自分のカードの数字は画面に表示しません。スター所持だけ裏面の違いで判別できます。
-- 特殊役は通常の積にボーナスを加える方式で仮実装しています（TRIPLITH +1000 / SYMBOL +400 / DOUBLES +200）。
-- 全員チェックで公開します。
-- 現在の精算処理はポットを勝者（同点なら勝者間）で分配する簡易版です。オールインのサイドポット、同点時の「レイズしていない者で山分け」、オールイン時の相手からの徴収上限は、最終仕様に合わせた追加調整が必要です。
-- CPUは現時点で高度な戦略を持ちません。
+### カード
+
+- -10～-1
+- +1～+10
+- 0カード3枚
+- スターカード1枚
+
+各プレイヤーに3枚配布します。
+
+自分の手札の数字は非公開です。
+他プレイヤーの手札は公開されます。
+スターカードを持っている場合は、裏面の違いで判別できます。
+
+### 初期点数
+
+各プレイヤー10,000点です。
+
+誰かの点数が0以下、または20,000点を超えた場合にゲーム終了となります。
+
+### ベット前
+
+- チェック：手札を変更せずに手番を終了
+- チェンジ：1～3枚交換。交換前のカードは山札に戻してシャッフル
+- ベット：100 / 200 / 400 / 800点
+
+### ベット後
+
+- コール：現在のベット額に合わせる
+- レイズ：現在のベット額を2倍にする
+- フォールド：規定の条件で勝負を降りる
+- オールイン：残りの点数をすべて賭ける
+- スワップ：1人1回、1～3枚交換。交換前のカードは山札に戻さない
+
+### 特殊役
+
+| 役名 | 条件 | ボーナス |
+|---|---|---:|
+| TRIPLITH | 0カード3枚 | +1,000点 |
+| SYMBOL | スター・0のみで構成 | +400点 |
+| DOUBLES | 3枚中2枚の絶対値が同じ | +200点 |
+
+特殊役は複合しません。
+
+## テスト版の注意事項
+
+このプロジェクトはオンライン対戦のテストを目的とした試作版です。
+
+以下の項目は、実際の複数端末でのテストと追加検証が必要です。
+
+- 複数プレイヤーの同時操作
+- WebSocketの切断・再接続
+- ページ再読み込み後の復帰
+- オールインの精算
+- 複数オールイン時のサイドポット
+- 全員同点時の精算
+- レイズ上限とフォールド条件
+- CPUの行動
+- ゲーム終了条件
+
+特に複数のオールインが発生する場合の精算は、最終仕様に合わせた追加実装が必要です。
+
+実際に友達と遊ぶ前に、少人数で十分な動作確認を行ってください。
+
+本番運用や一般公開を想定した完成版ではありません。
 
 ## フォント
-- Noto Serif JP：Google Fontsから読み込みます。SIL Open Font License 1.1。
-- Old London：CSSでフォント名を指定していますが、フォントファイル自体は同梱していません。利用者が配布元の現行ライセンスを確認し、適法に取得したファイルを `assets/fonts/OldLondon.ttf` として配置したうえで、必要に応じてCSSに `@font-face` を追加してください。
 
-## 既知の注意
-このプロジェクトは初期試作版です。公開前に必ずFirebaseのテストプロジェクトで複数端末テストを行ってください。特に同時操作、切断復帰、点数精算、レイズ上限、フォールド条件、オールインを重点的に確認してください。
+- Noto Serif JP：Google Fontsから読み込みます。SIL Open Font License 1.1。
+- Old London：フォントファイルは同梱していません。利用する場合は配布元の現行ライセンスを確認してください。
+
+## セキュリティ
+
+- 山札・手札・ゲーム状態はサーバー側で管理します。
+- プレイヤーごとに異なる情報を配信します。
+- アクセスコードはCloudflare Secretで管理します。
+- GitHubリポジトリにアクセスコードを記載しないでください。
+
+## 免責事項
+
+本ソフトウェアの利用によって発生したいかなる損害・問題についても、作者は一切の責任を負いません。
+
+自己責任で利用してください。
