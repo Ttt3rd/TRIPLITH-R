@@ -1,3 +1,4 @@
+
 {
   "name": "triplith-r-game-server",
   "main": "worker.js",
@@ -15,5 +16,6 @@
       "type": "durable-object",
       "storage": "sqlite"
     }
-  }
+  },
+  "preview_urls": false
 }
