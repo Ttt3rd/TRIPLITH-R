@@ -1,101 +1,1165 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
-import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-database.js";
-import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-functions.js";
-import { firebaseConfig } from "./firebase-config.js";
 
-const $ = id => document.getElementById(id);
+const API_BASE = "https://triplith-r-game-server.ktkt8600.workers.dev";
+
+const $ = (id) => document.getElementById(id);
+
 const ASSET = "./assets/cards/";
-let app, auth, db, functions, uid, roomId, roomCode, roomData, myView, stopPublic, stopView;
-let selected = new Set(), busy = false;
 
-const configured = firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("YOUR_");
-function show(id){$(id).classList.remove("hidden")}
-function hide(id){$(id).classList.add("hidden")}
-function err(id,msg){$(id).textContent=msg||""}
-function call(name,data={}){return httpsCallable(functions,name)(data).then(r=>r.data)}
-function money(n){return Number(n||0).toLocaleString("ja-JP")}
-function cardSrc(card){return ASSET+(card==="STAR"?"star.png":card+".png")}
-function backSrc(star){return ASSET+(star?"裏（スター）.png":"裏（ノーマル）.png")}
-function setBusy(v){busy=v;document.querySelectorAll("button").forEach(b=>{if(!b.dataset.keepEnabled)b.disabled=v})}
+const SESSION_KEYS = {
+  accessCode: "triplithAccessCode",
+  roomCode: "triplithRoomCode",
+  playerToken: "triplithPlayerToken",
+};
 
-async function init(){
-  if(!configured){$("connection").textContent="Firebase未設定";$("lobbyError").textContent="firebase-config.js にFirebase設定を入力してください。READMEの手順を参照。";return}
-  try{
-    app=initializeApp(firebaseConfig);auth=getAuth(app);db=getDatabase(app);functions=getFunctions(app,"asia-northeast1");
-    await signInAnonymously(auth);uid=auth.currentUser.uid;$("connection").textContent="接続済み";
-  }catch(e){$("connection").textContent="接続エラー";err("lobbyError",e.message)}
+let snapshot = null;
+let roomCode = null;
+let playerToken = null;
+let playerId = null;
+
+let socket = null;
+let reconnectTimer = null;
+let fallbackTimer = null;
+
+let selected = new Set();
+let busy = false;
+let manualLeave = false;
+
+
+// ========================================
+// 基本関数
+// ========================================
+
+function show(id) {
+  $(id).classList.remove("hidden");
 }
-function listen(id){
-  if(stopPublic)stopPublic();if(stopView)stopView();
-  roomId=id;
-  stopPublic=onValue(ref(db,`rooms/${id}/public`),snap=>{roomData=snap.val();render()});
-  stopView=onValue(ref(db,`rooms/${id}/views/${uid}`),snap=>{myView=snap.val();render()});
+
+function hide(id) {
+  $(id).classList.add("hidden");
 }
-function currentPlayer(){return roomData?.players?.find(p=>p.uid===uid)}
-function isMyTurn(){return roomData?.players?.[roomData.currentTurn]?.uid===uid}
-function render(){
-  if(!roomData)return;
-  roomCode=roomData.code;
-  if(roomData.status==="waiting"){
-    hide("lobby");hide("game");show("waiting");$("roomCodeView").textContent=roomCode;
-    $("waitingSeats").innerHTML=(roomData.players||[]).map((p,i)=>`<div class="seat-slot"><b>SEAT ${i+1}</b><span>${esc(p.name)}${p.isCpu?" · CPU":""}</span></div>`).join("");
-    $("startGame").disabled=roomData.hostUid!==uid||roomData.players.length!==3;
-    $("addCpu").disabled=roomData.hostUid!==uid||roomData.players.length>=3;
+
+function err(id, message) {
+  $(id).textContent = message || "";
+}
+
+function money(value) {
+  return Number(value || 0).toLocaleString("ja-JP");
+}
+
+function cardSrc(card) {
+  return ASSET + (card === "STAR" ? "star.png" : `${card}.png`);
+}
+
+// 元のプロジェクトにあるカード裏面画像を使用
+function backSrc(star) {
+  return ASSET + (star ? "裏（スター）.png" : "裏（ノーマル）.png");
+}
+
+function accessCode() {
+  return String(
+    $("accessCode").value ||
+    sessionStorage.getItem(SESSION_KEYS.accessCode) ||
+    ""
+  ).trim();
+}
+
+function saveSession() {
+  sessionStorage.setItem(
+    SESSION_KEYS.accessCode,
+    accessCode()
+  );
+
+  if (roomCode) {
+    sessionStorage.setItem(
+      SESSION_KEYS.roomCode,
+      roomCode
+    );
+  }
+
+  if (playerToken) {
+    sessionStorage.setItem(
+      SESSION_KEYS.playerToken,
+      playerToken
+    );
+  }
+}
+
+function clearRoomSession() {
+  sessionStorage.removeItem(SESSION_KEYS.roomCode);
+  sessionStorage.removeItem(SESSION_KEYS.playerToken);
+}
+
+function setBusy(value) {
+  busy = value;
+
+  [
+    "createRoom",
+    "joinRoom",
+    "addCpu",
+    "startGame",
+    "leaveRoom",
+    "copyCode",
+    "checkBtn",
+    "changeBtn",
+    "betBtn",
+    "callBtn",
+    "raiseBtn",
+    "foldBtn",
+    "allInBtn",
+    "swapBtn",
+    "backLobby",
+  ].forEach((id) => {
+    if ($(id)) {
+      $(id).disabled = value;
+    }
+  });
+
+  if (!value) {
+    render();
+  }
+}
+
+function getRoom() {
+  return snapshot?.room || null;
+}
+
+function getMyPlayer() {
+  return getRoom()?.players?.find(
+    (player) => player.id === playerId
+  ) || null;
+}
+
+function isMyTurn() {
+  const room = getRoom();
+
+  return room?.players?.[room.currentTurn]?.id === playerId;
+}
+
+
+// ========================================
+// Cloudflare API
+// ========================================
+
+async function api(path, payload = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+
+    headers: {
+      "Content-Type": "application/json",
+    },
+
+    cache: "no-store",
+
+    body: JSON.stringify({
+      accessCode: accessCode(),
+      ...payload,
+    }),
+  });
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      data.error || `サーバーエラー (${response.status})`
+    );
+  }
+
+  return data;
+}
+
+
+// ========================================
+// ゲーム状態
+// ========================================
+
+function setSnapshot(next) {
+  if (!next?.room || !next?.view) {
     return;
   }
-  if(roomData.status==="finished"){hide("lobby");hide("waiting");show("game");}
-  else{hide("lobby");hide("waiting");show("game")}
-  $("gameRoomCode").textContent=roomCode;$("pot").textContent=money(roomData.pot);
-  $("currentBet").textContent=money(roomData.currentBet);$("phaseLabel").textContent=roomData.phase==="prebet"?"BET前":roomData.phase==="betting"?"BET中":roomData.phase==="showdown"?"結果":"終了";
-  const me=currentPlayer();$("selfName").textContent=me?.name||"---";$("selfScore").textContent=money(me?.score);
-  $("opponents").innerHTML=(myView?.players||[]).filter(p=>p.uid!==uid).map(p=>playerCard(p)).join("");
-  const ownCards=Array.from({length:3},(_,i)=>`<img class="playing-card ${selected.has(i)?"selected":""}" data-index="${i}" src="${backSrc(myView?.hasStar)}" alt="伏せられたカード">`).join("");
-  $("myHand").innerHTML=ownCards;
-  $("myHand").querySelectorAll("img").forEach(img=>img.addEventListener("click",()=>{const i=Number(img.dataset.index);selected.has(i)?selected.delete(i):selected.add(i);render()}));
-  const active=roomData.players[roomData.currentTurn];
-  $("turnInfo").textContent=roomData.status==="finished"?"ゲーム終了":`手番：${active?.name||"---"}`;
-  $("gameLog").textContent=(roomData.log||[]).slice(-3).join("　／　");
-  $("raiseInfo").textContent=`レイズ ${roomData.raisesTotal||0}/8 · フォールド ${roomData.foldUsed?"使用済み":"未使用"}`;
-  const myTurn=isMyTurn()&&roomData.status==="playing"&&!me?.folded&&!me?.allIn;
-  $("actionStatus").textContent=roomData.status==="finished"?"ゲーム終了":myTurn?"あなたの番です":me?.folded?"フォールド中":me?.allIn?"オールイン済み":"相手の行動を待っています";
-  if(roomData.phase==="prebet"&&myTurn){show("preBetActions");hide("betActions")}else if(roomData.phase==="betting"&&myTurn){hide("preBetActions");show("betActions")}else{hide("preBetActions");hide("betActions")}
-  $("foldBtn").disabled=!!roomData.foldUsed||(roomData.raisesTotal||0)>=4;
-  $("raiseBtn").disabled=(roomData.raisesTotal||0)>=8||(me?.raises||0)>=4||me?.score<(roomData.currentBet*2-(me?.contribution||0));
-  $("callBtn").disabled=me?.score<(roomData.currentBet-(me?.contribution||0));
-  $("changeBtn").disabled=selected.size<1||selected.size>3;
-  $("swapBtn").disabled=selected.size<1||selected.size>3||!!me?.swapped;
-  $("changeBtn").textContent=`チェンジ${selected.size?` (${selected.size}枚)`:""}`;
-  $("swapBtn").textContent=`スワップ${selected.size?` (${selected.size}枚)`:""}`;
-}
-function playerCard(p){
-  const faces=(p.hand||[]).map(c=>`<img class="playing-card" src="${cardSrc(c)}" alt="カード">`).join("");
-  const status=p.folded?"FOLD":p.allIn?"ALL IN":p.called?"CALL":"";
-  return `<div class="player-card ${roomData.players[roomData.currentTurn]?.uid===p.uid?"active":""}"><div class="player-head"><b>${esc(p.name)}</b><span class="muted">${money(p.score)}点 · ${status}</span></div><div class="opponent-hand">${faces}</div></div>`;
-}
-function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-async function runAction(action,extra={}){
-  if(busy)return;setBusy(true);err("gameError","");
-  try{await call("playerAction",{roomId,action,indices:[...selected],...extra});selected.clear()}
-  catch(e){err("gameError",e.message)}
-  finally{setBusy(false);render()}
+
+  snapshot = next;
+  playerId = next.playerId;
+  roomCode = next.room.code;
+
+  render();
 }
 
-$("createRoom").onclick=async()=>{try{setBusy(true);const r=await call("createRoom",{name:$("playerName").value.trim()||"Player"});listen(r.roomId)}catch(e){err("lobbyError",e.message)}finally{setBusy(false)}};
-$("joinRoom").onclick=async()=>{try{setBusy(true);const r=await call("joinRoom",{code:$("roomCode").value.trim().toUpperCase(),name:$("playerName").value.trim()||"Player"});listen(r.roomId)}catch(e){err("lobbyError",e.message)}finally{setBusy(false)}};
-$("addCpu").onclick=async()=>{try{setBusy(true);await call("addCpu",{roomId})}catch(e){err("waitingError",e.message)}finally{setBusy(false)}};
-$("startGame").onclick=async()=>{try{setBusy(true);await call("startGame",{roomId})}catch(e){err("waitingError",e.message)}finally{setBusy(false)}};
-$("copyCode").onclick=()=>navigator.clipboard?.writeText(roomCode);
-$("leaveRoom").onclick=()=>{if(stopPublic)stopPublic();if(stopView)stopView();roomId=null;roomData=null;myView=null;hide("waiting");show("lobby")};
-$("backLobby").onclick=()=>{if(roomData?.status==="finished"){$("leaveRoom").click()}else err("gameError","対戦中はルームを退出できません。")};
-$("checkBtn").onclick=()=>runAction("check");
-$("changeBtn").onclick=()=>runAction("change");
-$("betBtn").onclick=()=>runAction("bet",{amount:Number($("betAmount").value)});
-$("callBtn").onclick=()=>runAction("call");
-$("raiseBtn").onclick=()=>runAction("raise");
-$("foldBtn").onclick=()=>runAction("fold");
-$("allInBtn").onclick=()=>runAction("allin");
-$("swapBtn").onclick=()=>runAction("swap");
-$("rulesBtn").onclick=()=>$("rulesDialog").showModal();
-$("closeRules").onclick=()=>$("rulesDialog").close();
+
+// ========================================
+// WebSocket
+// ========================================
+
+function startSocket() {
+  stopSocket(false);
+
+  if (!roomCode || !playerToken) {
+    return;
+  }
+
+  const wsUrl =
+    API_BASE
+      .replace(/^https:/, "wss:")
+      .replace(/^http:/, "ws:") +
+    `/api/rooms/ws?code=${encodeURIComponent(roomCode)}`;
+
+  try {
+    socket = new WebSocket(wsUrl);
+  } catch {
+    startFallbackPolling();
+    scheduleReconnect();
+    return;
+  }
+
+  const ws = socket;
+
+  ws.addEventListener("open", () => {
+    if (socket !== ws) {
+      return;
+    }
+
+    ws.send(JSON.stringify({
+      type: "auth",
+      accessCode: accessCode(),
+      playerToken,
+    }));
+
+    $("connection").textContent = "通信中";
+
+    stopFallbackPolling();
+  });
+
+  ws.addEventListener("message", (event) => {
+    let message;
+
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+
+    if (message.type === "state") {
+      setSnapshot(message.data);
+
+      $("connection").textContent = "接続済み";
+
+      stopFallbackPolling();
+
+    } else if (message.type === "error") {
+      $("connection").textContent = "認証エラー";
+
+      err(
+        getRoom()?.status === "waiting"
+          ? "waitingError"
+          : "gameError",
+        message.message
+      );
+    }
+  });
+
+  ws.addEventListener("close", () => {
+    if (socket === ws) {
+      socket = null;
+    }
+
+    if (manualLeave || !roomCode) {
+      return;
+    }
+
+    $("connection").textContent = "再接続中";
+
+    startFallbackPolling();
+    scheduleReconnect();
+  });
+
+  ws.addEventListener("error", () => {
+    $("connection").textContent = "通信再接続中";
+
+    startFallbackPolling();
+  });
+}
+
+function stopSocket(clearReconnect = true) {
+  if (clearReconnect && reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
+  if (socket) {
+    const old = socket;
+    socket = null;
+
+    try {
+      old.close();
+    } catch {
+      // 接続終了時のエラーは無視
+    }
+  }
+}
+
+function scheduleReconnect() {
+  if (
+    reconnectTimer ||
+    manualLeave ||
+    !roomCode
+  ) {
+    return;
+  }
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+
+    if (!manualLeave && roomCode) {
+      startSocket();
+    }
+  }, 2500);
+}
+
+
+// ========================================
+// WebSocket切断時の代替通信
+// ========================================
+
+function startFallbackPolling() {
+  if (fallbackTimer || !roomCode) {
+    return;
+  }
+
+  fallbackTimer = setInterval(async () => {
+    if (socket?.readyState === WebSocket.OPEN) {
+      return;
+    }
+
+    try {
+      const result = await api(
+        "/api/rooms/state",
+        {
+          roomCode,
+          playerToken,
+        }
+      );
+
+      setSnapshot(result.snapshot);
+
+    } catch (error) {
+      $("connection").textContent = "接続待機中";
+
+      if (
+        /プレイヤー認証|ルームが見つかりません/.test(
+          error.message
+        )
+      ) {
+        clearRoomSession();
+
+        roomCode = null;
+        playerToken = null;
+
+        stopFallbackPolling();
+
+        hide("waiting");
+        hide("game");
+        show("lobby");
+
+        err(
+          "lobbyError",
+          "セッションが無効になりました。もう一度ルームに参加してください。"
+        );
+      }
+    }
+  }, 5000);
+}
+
+function stopFallbackPolling() {
+  if (fallbackTimer) {
+    clearInterval(fallbackTimer);
+  }
+
+  fallbackTimer = null;
+}
+
+
+// ========================================
+// ルーム参加
+// ========================================
+
+async function enterRoom(
+  code,
+  token,
+  initialSnapshot = null
+) {
+  manualLeave = false;
+
+  roomCode = code;
+  playerToken = token;
+
+  if (initialSnapshot) {
+    setSnapshot(initialSnapshot);
+
+  } else {
+    const result = await api(
+      "/api/rooms/state",
+      {
+        roomCode,
+        playerToken,
+      }
+    );
+
+    setSnapshot(result.snapshot);
+  }
+
+  saveSession();
+
+  startSocket();
+}
+
+
+// ========================================
+// プレイヤー表示
+// ========================================
+
+function playerCard(player) {
+  const faces = (player.hand || [])
+    .map(
+      (card) =>
+        `<img class="playing-card" src="${cardSrc(card)}" alt="カード">`
+    )
+    .join("");
+
+  const status =
+    player.folded
+      ? "FOLD"
+      : player.allIn
+        ? "ALL IN"
+        : player.called
+          ? "CALL"
+          : "";
+
+  const active =
+    getRoom()?.players?.[getRoom().currentTurn]?.id ===
+    player.id;
+
+  return `
+    <div class="player-card ${active ? "active" : ""}">
+      <div class="player-head">
+        <b>${escapeHtml(player.name)}</b>
+        <span class="muted">
+          ${money(player.score)}点 · ${status}
+        </span>
+      </div>
+
+      <div class="opponent-hand">
+        ${faces}
+      </div>
+    </div>
+  `;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(
+    /[&<>"']/g,
+    (character) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    })[character]
+  );
+}
+
+
+// ========================================
+// 待機ルーム表示
+// ========================================
+
+function renderWaiting(room) {
+  hide("lobby");
+  hide("game");
+  show("waiting");
+
+  $("roomCodeView").textContent = room.code;
+
+  const seats = room.players.map(
+    (player, index) => `
+      <div class="seat-slot">
+        <b>SEAT ${index + 1}</b>
+        <span>
+          ${escapeHtml(player.name)}
+          ${player.isCpu ? " · CPU" : ""}
+        </span>
+      </div>
+    `
+  );
+
+  for (
+    let index = seats.length;
+    index < 3;
+    index++
+  ) {
+    seats.push(`
+      <div class="seat-slot empty-seat">
+        <b>SEAT ${index + 1}</b>
+        <span>空席</span>
+      </div>
+    `);
+  }
+
+  $("waitingSeats").innerHTML = seats.join("");
+
+  const isHost = room.hostPlayerId === playerId;
+
+  $("startGame").disabled =
+    !isHost ||
+    room.players.length !== 3 ||
+    busy;
+
+  $("addCpu").disabled =
+    !isHost ||
+    room.players.length >= 3 ||
+    busy;
+
+  $("startGame").textContent =
+    room.players.length === 3
+      ? "ゲーム開始"
+      : `ゲーム開始（${room.players.length}/3人）`;
+}
+
+
+// ========================================
+// ゲーム画面表示
+// ========================================
+
+function renderGame(room, view) {
+  hide("lobby");
+  hide("waiting");
+  show("game");
+
+  $("gameRoomCode").textContent = room.code;
+
+  $("pot").textContent = money(room.pot);
+
+  $("currentBet").textContent =
+    money(room.currentBet);
+
+  $("phaseLabel").textContent =
+    room.phase === "prebet"
+      ? "BET前"
+      : room.phase === "betting"
+        ? "BET中"
+        : room.phase === "showdown"
+          ? "結果"
+          : "終了";
+
+
+  // 自分の情報
+
+  const me = getMyPlayer();
+
+  $("selfName").textContent =
+    me?.name || "---";
+
+  $("selfScore").textContent =
+    money(me?.score);
+
+
+  // 他のプレイヤー
+
+  $("opponents").innerHTML =
+    (view.players || [])
+      .filter(
+        (player) => player.id !== playerId
+      )
+      .map(playerCard)
+      .join("");
+
+
+  // 自分の手札
+  // 数字は表示せず、スターの有無だけ裏面で判別する。
+
+  const ownCards = Array.from(
+    { length: 3 },
+    (_, index) => `
+      <img
+        class="playing-card ${selected.has(index) ? "selected" : ""}"
+        data-index="${index}"
+        src="${backSrc(view.hasStar)}"
+        alt="伏せられたカード"
+      >
+    `
+  ).join("");
+
+  $("myHand").innerHTML = ownCards;
+
+  $("myHand")
+    .querySelectorAll("img")
+    .forEach((image) => {
+      image.addEventListener("click", () => {
+        if (busy || !isMyTurn()) {
+          return;
+        }
+
+        const index = Number(image.dataset.index);
+
+        if (selected.has(index)) {
+          selected.delete(index);
+        } else {
+          selected.add(index);
+        }
+
+        render();
+      });
+    });
+
+
+  // 手番
+
+  const activePlayer =
+    room.players[room.currentTurn];
+
+  $("turnInfo").textContent =
+    room.status === "finished"
+      ? "ゲーム終了"
+      : `手番：${activePlayer?.name || "---"}`;
+
+
+  // ログ
+
+  const logLines = (room.log || []).slice(-3);
+
+  if (room.lastResult) {
+    const previous = room.lastResult.allTied
+      ? "前回：同点（賭け点返却）"
+      : `前回：${room.lastResult.winners.join("・")} の勝利`;
+
+    const revealed =
+      (room.lastResult.hands || [])
+        .map((hand) =>
+          `${hand.name}: ${(hand.hand || []).join(" / ")}${hand.role ? ` (${hand.role})` : ""}${hand.folded ? " [FOLD]" : ""}`
+        )
+        .join(" ｜ ");
+
+    logLines.push(previous);
+
+    if (revealed) {
+      logLines.push(`公開手札：${revealed}`);
+    }
+  }
+
+  $("gameLog").textContent =
+    logLines.join(" ／ ");
+
+
+  // レイズ情報
+
+  $("raiseInfo").textContent =
+    `レイズ ${room.raisesTotal || 0}/8 · フォールド ${room.foldUsed ? "使用済み" : "未使用"}`;
+
+
+  // 操作可能か判定
+
+  const myTurn =
+    isMyTurn() &&
+    room.status === "playing" &&
+    !me?.folded &&
+    !me?.allIn &&
+    !busy;
+
+  $("actionStatus").textContent =
+    room.status === "finished"
+      ? "ゲーム終了"
+      : myTurn
+        ? "あなたの番です"
+        : me?.folded
+          ? "フォールド中"
+          : me?.allIn
+            ? "オールイン済み"
+            : "相手の行動を待っています";
+
+
+  // フェーズごとの操作ボタン
+
+  if (room.phase === "prebet" && myTurn) {
+    show("preBetActions");
+    hide("betActions");
+
+  } else if (
+    room.phase === "betting" &&
+    myTurn
+  ) {
+    hide("preBetActions");
+    show("betActions");
+
+  } else {
+    hide("preBetActions");
+    hide("betActions");
+  }
+
+
+  // ボタンの使用条件
+
+  $("foldBtn").disabled =
+    !!room.foldUsed ||
+    (room.raisesTotal || 0) >= 4 ||
+    busy;
+
+  $("raiseBtn").disabled =
+    (room.raisesTotal || 0) >= 8 ||
+    (me?.raises || 0) >= 4 ||
+    me?.score <
+      (
+        room.currentBet * 2 -
+        (me?.contribution || 0)
+      ) ||
+    busy;
+
+  $("callBtn").disabled =
+    me?.score <
+      (
+        room.currentBet -
+        (me?.contribution || 0)
+      ) ||
+    busy;
+
+  $("changeBtn").disabled =
+    selected.size < 1 ||
+    selected.size > 3 ||
+    busy;
+
+  $("swapBtn").disabled =
+    selected.size < 1 ||
+    selected.size > 3 ||
+    !!me?.swapped ||
+    busy;
+
+  $("changeBtn").textContent =
+    `チェンジ${selected.size ? ` (${selected.size}枚)` : ""}`;
+
+  $("swapBtn").textContent =
+    `スワップ${selected.size ? ` (${selected.size}枚)` : ""}`;
+
+  $("allInBtn").disabled =
+    (me?.score || 0) <= 0 ||
+    busy;
+
+  $("checkBtn").disabled = busy;
+  $("betBtn").disabled = busy;
+
+
+  // ゲーム終了時
+
+  if (
+    room.status === "finished" &&
+    room.lastResult
+  ) {
+    const result = room.lastResult;
+
+    $("turnInfo").textContent =
+      result.allTied
+        ? "最終結果：同点"
+        : `勝者：${result.winners.join("・")}`;
+
+    $("gameLog").textContent =
+      result.hands
+        .map(
+          (hand) =>
+            `${hand.name}: ${hand.hand.join(" / ")} ${hand.role ? `(${hand.role})` : ""}`
+        )
+        .join("　｜　");
+  }
+}
+
+
+// ========================================
+// 全体描画
+// ========================================
+
+function render() {
+  if (!snapshot) {
+    return;
+  }
+
+  const room = getRoom();
+
+  if (!room) {
+    return;
+  }
+
+  if (room.status === "waiting") {
+    renderWaiting(room);
+  } else {
+    renderGame(room, snapshot.view);
+  }
+}
+
+
+// ========================================
+// ゲーム操作
+// ========================================
+
+async function runAction(action, extra = {}) {
+  if (busy || !roomCode) {
+    return;
+  }
+
+  setBusy(true);
+
+  err("gameError", "");
+
+  try {
+    const result = await api(
+      "/api/rooms/action",
+      {
+        roomCode,
+        playerToken,
+        action,
+        indices: [...selected],
+        ...extra,
+      }
+    );
+
+    if (result.snapshot) {
+      setSnapshot(result.snapshot);
+    }
+
+    selected.clear();
+
+  } catch (error) {
+    err("gameError", error.message);
+
+  } finally {
+    setBusy(false);
+  }
+}
+
+
+// ========================================
+// ルーム作成
+// ========================================
+
+$("createRoom").onclick = async () => {
+  if (!accessCode()) {
+    err(
+      "lobbyError",
+      "専用アクセスコードを入力してください。"
+    );
+
+    $("accessCode").focus();
+    return;
+  }
+
+  manualLeave = false;
+
+  setBusy(true);
+  err("lobbyError", "");
+
+  try {
+    const result = await api(
+      "/api/rooms/create",
+      {
+        name:
+          $("playerName").value.trim() ||
+          "Player",
+      }
+    );
+
+    $("accessCode").value = accessCode();
+
+    await enterRoom(
+      result.roomCode,
+      result.playerToken,
+      result.snapshot
+    );
+
+  } catch (error) {
+    err("lobbyError", error.message);
+
+  } finally {
+    setBusy(false);
+  }
+};
+
+
+// ========================================
+// ルーム参加
+// ========================================
+
+$("joinRoom").onclick = async () => {
+  if (!accessCode()) {
+    err(
+      "lobbyError",
+      "専用アクセスコードを入力してください。"
+    );
+
+    $("accessCode").focus();
+    return;
+  }
+
+  const code =
+    $("roomCode").value.trim().toUpperCase();
+
+  if (!code) {
+    err(
+      "lobbyError",
+      "ルームコードを入力してください。"
+    );
+
+    return;
+  }
+
+  manualLeave = false;
+
+  setBusy(true);
+  err("lobbyError", "");
+
+  try {
+    const result = await api(
+      "/api/rooms/join",
+      {
+        roomCode: code,
+        name:
+          $("playerName").value.trim() ||
+          "Player",
+      }
+    );
+
+    $("accessCode").value = accessCode();
+
+    await enterRoom(
+      result.roomCode,
+      result.playerToken,
+      result.snapshot
+    );
+
+  } catch (error) {
+    err("lobbyError", error.message);
+
+  } finally {
+    setBusy(false);
+  }
+};
+
+
+// ========================================
+// CPU追加
+// ========================================
+
+$("addCpu").onclick = async () => {
+  setBusy(true);
+  err("waitingError", "");
+
+  try {
+    const result = await api(
+      "/api/rooms/cpu",
+      {
+        roomCode,
+        playerToken,
+      }
+    );
+
+    if (result.snapshot) {
+      setSnapshot(result.snapshot);
+    }
+
+  } catch (error) {
+    err("waitingError", error.message);
+
+  } finally {
+    setBusy(false);
+  }
+};
+
+
+// ========================================
+// ゲーム開始
+// ========================================
+
+$("startGame").onclick = async () => {
+  setBusy(true);
+  err("waitingError", "");
+
+  try {
+    const result = await api(
+      "/api/rooms/start",
+      {
+        roomCode,
+        playerToken,
+      }
+    );
+
+    if (result.snapshot) {
+      setSnapshot(result.snapshot);
+    }
+
+  } catch (error) {
+    err("waitingError", error.message);
+
+  } finally {
+    setBusy(false);
+  }
+};
+
+
+// ========================================
+// ルーム退出
+// ========================================
+
+async function leaveCurrentRoom() {
+  if (!roomCode || !playerToken) {
+    return;
+  }
+
+  try {
+    await api(
+      "/api/rooms/leave",
+      {
+        roomCode,
+        playerToken,
+      }
+    );
+  } catch {
+    // すでにルームが閉じている場合など
+  }
+
+  manualLeave = true;
+
+  stopSocket();
+  stopFallbackPolling();
+
+  roomCode = null;
+  playerToken = null;
+  playerId = null;
+  snapshot = null;
+
+  selected.clear();
+
+  clearRoomSession();
+
+  hide("waiting");
+  hide("game");
+  show("lobby");
+
+  $("connection").textContent = "未接続";
+}
+
+
+// ========================================
+// ボタンイベント
+// ========================================
+
+$("copyCode").onclick = () => {
+  if (
+    roomCode &&
+    navigator.clipboard?.writeText
+  ) {
+    navigator.clipboard.writeText(roomCode);
+  }
+};
+
+$("leaveRoom").onclick = leaveCurrentRoom;
+
+$("backLobby").onclick = () => {
+  if (getRoom()?.status === "finished") {
+    leaveCurrentRoom();
+  } else {
+    err(
+      "gameError",
+      "対戦中はルームを退出できません。"
+    );
+  }
+};
+
+$("checkBtn").onclick =
+  () => runAction("check");
+
+$("changeBtn").onclick =
+  () => runAction("change");
+
+$("betBtn").onclick =
+  () => runAction(
+    "bet",
+    {
+      amount: Number($("betAmount").value),
+    }
+  );
+
+$("callBtn").onclick =
+  () => runAction("call");
+
+$("raiseBtn").onclick =
+  () => runAction("raise");
+
+$("foldBtn").onclick =
+  () => runAction("fold");
+
+$("allInBtn").onclick =
+  () => runAction("allin");
+
+$("swapBtn").onclick =
+  () => runAction("swap");
+
+$("rulesBtn").onclick =
+  () => $("rulesDialog").showModal();
+
+$("closeRules").onclick =
+  () => $("rulesDialog").close();
+
+
+// ========================================
+// 再読み込み時の復帰
+// ========================================
+
+async function init() {
+  $("accessCode").value =
+    sessionStorage.getItem(
+      SESSION_KEYS.accessCode
+    ) || "";
+
+  const savedRoomCode =
+    sessionStorage.getItem(
+      SESSION_KEYS.roomCode
+    );
+
+  const savedToken =
+    sessionStorage.getItem(
+      SESSION_KEYS.playerToken
+    );
+
+  if (
+    !savedRoomCode ||
+    !savedToken ||
+    !accessCode()
+  ) {
+    return;
+  }
+
+  roomCode = savedRoomCode;
+  playerToken = savedToken;
+
+  try {
+    const result = await api(
+      "/api/rooms/state",
+      {
+        roomCode,
+        playerToken,
+      }
+    );
+
+    setSnapshot(result.snapshot);
+
+    startSocket();
+
+    $("connection").textContent = "接続済み";
+
+  } catch {
+    clearRoomSession();
+
+    roomCode = null;
+    playerToken = null;
+  }
+}
+
 init();
