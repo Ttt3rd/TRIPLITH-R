@@ -46,12 +46,19 @@ function money(value) {
 }
 
 function cardSrc(card) {
-  return ASSET + (card === "STAR" ? "star.png" : `${card}.png`);
+  return ASSET + (
+    card === "STAR"
+      ? "star.png"
+      : `${card}.png`
+  );
 }
 
-// 元のプロジェクトにあるカード裏面画像を使用
 function backSrc(star) {
-  return ASSET + (star ? "裏（スター）.png" : "裏（ノーマル）.png");
+  return ASSET + (
+    star
+      ? "裏（スター）.png"
+      : "裏（ノーマル）.png"
+  );
 }
 
 function accessCode() {
@@ -131,7 +138,9 @@ function getMyPlayer() {
 function isMyTurn() {
   const room = getRoom();
 
-  return room?.players?.[room.currentTurn]?.id === playerId;
+  return (
+    room?.players?.[room.currentTurn]?.id === playerId
+  );
 }
 
 
@@ -140,20 +149,23 @@ function isMyTurn() {
 // ========================================
 
 async function api(path, payload = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
+  const response = await fetch(
+    `${API_BASE}${path}`,
+    {
+      method: "POST",
 
-    headers: {
-      "Content-Type": "application/json",
-    },
+      headers: {
+        "Content-Type": "application/json",
+      },
 
-    cache: "no-store",
+      cache: "no-store",
 
-    body: JSON.stringify({
-      accessCode: accessCode(),
-      ...payload,
-    }),
-  });
+      body: JSON.stringify({
+        accessCode: accessCode(),
+        ...payload,
+      }),
+    }
+  );
 
   let data;
 
@@ -165,7 +177,8 @@ async function api(path, payload = {}) {
 
   if (!response.ok) {
     throw new Error(
-      data.error || `サーバーエラー (${response.status})`
+      data.error ||
+      `サーバーエラー (${response.status})`
     );
   }
 
@@ -218,15 +231,15 @@ function startSocket() {
   const ws = socket;
 
   ws.addEventListener("open", () => {
-    if (socket !== ws) {
-      return;
-    }
+    if (socket !== ws) return;
 
-    ws.send(JSON.stringify({
-      type: "auth",
-      accessCode: accessCode(),
-      playerToken,
-    }));
+    ws.send(
+      JSON.stringify({
+        type: "auth",
+        accessCode: accessCode(),
+        playerToken,
+      })
+    );
 
     $("connection").textContent = "通信中";
 
@@ -424,8 +437,13 @@ async function enterRoom(
 function playerCard(player) {
   const faces = (player.hand || [])
     .map(
-      (card) =>
-        `<img class="playing-card" src="${cardSrc(card)}" alt="カード">`
+      (card) => `
+        <img
+          class="playing-card"
+          src="${cardSrc(card)}"
+          alt="カード"
+        >
+      `
     )
     .join("");
 
@@ -439,13 +457,15 @@ function playerCard(player) {
           : "";
 
   const active =
-    getRoom()?.players?.[getRoom().currentTurn]?.id ===
-    player.id;
+    getRoom()?.players?.[
+      getRoom().currentTurn
+    ]?.id === player.id;
 
   return `
     <div class="player-card ${active ? "active" : ""}">
       <div class="player-head">
         <b>${escapeHtml(player.name)}</b>
+
         <span class="muted">
           ${money(player.score)}点 · ${status}
         </span>
@@ -487,6 +507,7 @@ function renderWaiting(room) {
     (player, index) => `
       <div class="seat-slot">
         <b>SEAT ${index + 1}</b>
+
         <span>
           ${escapeHtml(player.name)}
           ${player.isCpu ? " · CPU" : ""}
@@ -510,7 +531,8 @@ function renderWaiting(room) {
 
   $("waitingSeats").innerHTML = seats.join("");
 
-  const isHost = room.hostPlayerId === playerId;
+  const isHost =
+    room.hostPlayerId === playerId;
 
   $("startGame").disabled =
     !isHost ||
@@ -555,7 +577,9 @@ function renderGame(room, view) {
           : "終了";
 
 
+  // ------------------------------------
   // 自分の情報
+  // ------------------------------------
 
   const me = getMyPlayer();
 
@@ -566,7 +590,9 @@ function renderGame(room, view) {
     money(me?.score);
 
 
+  // ------------------------------------
   // 他のプレイヤー
+  // ------------------------------------
 
   $("opponents").innerHTML =
     (view.players || [])
@@ -577,19 +603,37 @@ function renderGame(room, view) {
       .join("");
 
 
+  // ------------------------------------
   // 自分の手札
-  // 数字は表示せず、スターの有無だけ裏面で判別する。
+  // ------------------------------------
+
+  // starIndexは自分のスターカードの位置。
+  // 0～2ならその位置のみスター用の裏面にする。
+  // -1ならスターを持っていない。
+
+  const starIndex = Number(view.starIndex);
 
   const ownCards = Array.from(
     { length: 3 },
-    (_, index) => `
-      <img
-        class="playing-card ${selected.has(index) ? "selected" : ""}"
-        data-index="${index}"
-        src="${backSrc(view.hasStar)}"
-        alt="伏せられたカード"
-      >
-    `
+    (_, index) => {
+      const isStar = starIndex === index;
+
+      const imageSource = backSrc(isStar);
+
+      const altText = isStar
+        ? "スターカード"
+        : "伏せられたカード";
+
+      return `
+        <img
+          class="playing-card ${selected.has(index) ? "selected" : ""}"
+          data-index="${index}"
+          src="${imageSource}"
+          alt="${altText}"
+          title="${isStar ? "スターカード" : "伏せカード"}"
+        >
+      `;
+    }
   ).join("");
 
   $("myHand").innerHTML = ownCards;
@@ -615,7 +659,9 @@ function renderGame(room, view) {
     });
 
 
-  // 手番
+  // ------------------------------------
+  // 手番情報
+  // ------------------------------------
 
   const activePlayer =
     room.players[room.currentTurn];
@@ -626,14 +672,18 @@ function renderGame(room, view) {
       : `手番：${activePlayer?.name || "---"}`;
 
 
+  // ------------------------------------
   // ログ
+  // ------------------------------------
 
-  const logLines = (room.log || []).slice(-3);
+  const logLines =
+    (room.log || []).slice(-3);
 
   if (room.lastResult) {
-    const previous = room.lastResult.allTied
-      ? "前回：同点（賭け点返却）"
-      : `前回：${room.lastResult.winners.join("・")} の勝利`;
+    const previous =
+      room.lastResult.allTied
+        ? "前回：同点（賭け点返却）"
+        : `前回：${room.lastResult.winners.join("・")} の勝利`;
 
     const revealed =
       (room.lastResult.hands || [])
@@ -653,13 +703,19 @@ function renderGame(room, view) {
     logLines.join(" ／ ");
 
 
+  // ------------------------------------
   // レイズ情報
+  // ------------------------------------
 
   $("raiseInfo").textContent =
-    `レイズ ${room.raisesTotal || 0}/8 · フォールド ${room.foldUsed ? "使用済み" : "未使用"}`;
+    `レイズ ${room.raisesTotal || 0}/8 · フォールド ${
+      room.foldUsed ? "使用済み" : "未使用"
+    }`;
 
 
-  // 操作可能か判定
+  // ------------------------------------
+  // 手番判定
+  // ------------------------------------
 
   const myTurn =
     isMyTurn() &&
@@ -680,7 +736,9 @@ function renderGame(room, view) {
             : "相手の行動を待っています";
 
 
+  // ------------------------------------
   // フェーズごとの操作ボタン
+  // ------------------------------------
 
   if (room.phase === "prebet" && myTurn) {
     show("preBetActions");
@@ -699,7 +757,9 @@ function renderGame(room, view) {
   }
 
 
+  // ------------------------------------
   // ボタンの使用条件
+  // ------------------------------------
 
   $("foldBtn").disabled =
     !!room.foldUsed ||
@@ -749,7 +809,9 @@ function renderGame(room, view) {
   $("betBtn").disabled = busy;
 
 
-  // ゲーム終了時
+  // ------------------------------------
+  // ゲーム終了
+  // ------------------------------------
 
   if (
     room.status === "finished" &&
@@ -1059,7 +1121,8 @@ $("copyCode").onclick = () => {
   }
 };
 
-$("leaveRoom").onclick = leaveCurrentRoom;
+$("leaveRoom").onclick =
+  leaveCurrentRoom;
 
 $("backLobby").onclick = () => {
   if (getRoom()?.status === "finished") {
